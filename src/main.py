@@ -1,16 +1,16 @@
 """Interface exclusivamente pelo terminal. Execute: python main.py."""
-from dataclasses import asdict, is_dataclass
+from dataclasses import fields, is_dataclass
 from getpass import getpass
 import sqlite3
-from database import conectar
-from services import Sistema, RegraNegocio
+from database import Database
+from services import Sistema
 
 
 def inteiro(mensagem):
     try:
         return int(input(mensagem))
     except ValueError:
-        raise RegraNegocio('Digite um número inteiro.') from None
+        raise ValueError('Digite um número inteiro.') from None
 
 
 def mostrar(registros):
@@ -18,7 +18,7 @@ def mostrar(registros):
     if not registros:
         print('Nenhum registro encontrado.')
     for r in registros:
-        dados = asdict(r) if is_dataclass(r) else dict(r)
+        dados = {f.name: getattr(r, f.name) for f in fields(r) if f.name != 'db'} if is_dataclass(r) else dict(r)
         print(' | '.join(f'{k}: {v if v is not None else "—"}' for k, v in dados.items()))
 
 
@@ -28,7 +28,7 @@ def menu(titulo, opcoes):
         print(f'{chave} - {descricao}')
     escolha = input('Opção: ').strip()
     if escolha not in opcoes:
-        raise RegraNegocio('Opção inválida.')
+        raise ValueError('Opção inválida.')
     return escolha
 
 
@@ -41,7 +41,7 @@ def selecionar_id(registros, rotulo):
     while True:
         try:
             ident = inteiro(f'{rotulo} (0 volta ao menu): ')
-        except RegraNegocio as exc:
+        except ValueError as exc:
             print(exc)
             continue
         if ident == 0:
@@ -71,7 +71,7 @@ class CLI:
                 else:
                     u = self.s.login(input('E-mail: '), getpass('Senha: '))
                     self.sessao(u)
-            except (RegraNegocio, sqlite3.Error) as exc:
+            except (ValueError, sqlite3.Error) as exc:
                 print('Erro:', exc)
 
     def sessao(self, u):
@@ -94,9 +94,9 @@ class CLI:
                         if h is None:
                             continue
                         if not any(evento.id == h for evento in eventos):
-                            raise RegraNegocio('Hackathon não encontrado. Escolha um ID da lista.')
+                            raise ValueError('Hackathon não encontrado. Escolha um ID da lista.')
                         if self.s.db.execute('SELECT 1 FROM inscricoes WHERE usuario_id=? AND hackathon_id=?', (u, h)).fetchone():
-                            raise RegraNegocio('Você já está inscrito. Use Meus hackathons / abrir.')
+                            raise ValueError('Você já está inscrito. Use Meus hackathons / abrir.')
                         papel = menu('ESCOLHA SEU PAPEL', {'1': 'Participante', '2': 'Mentor', '3': 'Jurado'})
                         self.s.hackathon(h).entrar(u, {'1': 'participante', '2': 'mentor', '3': 'jurado'}[papel])
                         self.hackathon(u, h)
@@ -105,7 +105,7 @@ class CLI:
                         h = selecionar_id(rows, 'ID do hackathon')
                         if h is not None:
                             self.hackathon(u, h)
-            except (RegraNegocio, sqlite3.Error) as exc:
+            except (ValueError, sqlite3.Error) as exc:
                 print('Erro:', exc)
 
     def organizador(self, u):
@@ -155,14 +155,16 @@ class CLI:
                     'mentor': {'1': 'Visualizar minhas mentorias e comentários', '2': 'Iniciar mentoria', '3': 'Editar comentários'},
                     'jurado': {'1': 'Todos os projetos e minhas avaliações', '2': 'Projetos que já avaliei', '3': 'Projetos que ainda não avaliei', '4': 'Criar avaliação', '5': 'Editar minha avaliação'},
                 }[papel]
+                opcao_ranking = str(len(opcoes) + 1)
+                opcao_saida = str(len(opcoes) + 2)
                 op = menu(self.s.obter('hackathons', h)['nome'] + ' / ' + papel.upper(),
-                          {**opcoes, '4': 'Ver ranking das equipes', '5': 'Sair do hackathon', '0': 'Voltar'})
+                          {**opcoes, opcao_ranking: 'Ver ranking das equipes', opcao_saida: 'Sair do hackathon', '0': 'Voltar'})
                 if op == '0':
                     return
-                if op == '4':
+                if op == opcao_ranking:
                     self.ranking(h)
                     continue
-                if op == '5':
+                if op == opcao_saida:
                     if confirmar('Remover sua inscrição neste hackathon?'):
                         self.s.atuacao(u, h).sair_hackathon()
                         print('Você saiu do hackathon. Histórico de mentorias e avaliações preservado.')
@@ -174,7 +176,7 @@ class CLI:
                     self.mentor(u, h, op)
                 else:
                     self.jurado(u, h, op)
-            except (RegraNegocio, sqlite3.Error) as exc:
+            except (ValueError, sqlite3.Error) as exc:
                 print('Erro:', exc)
 
     def ranking(self, h):
@@ -244,7 +246,7 @@ class CLI:
                 elif confirmar('Excluir equipe, projeto, mentorias e avaliações associados?'):
                     e.excluir(u)
                     return
-            except (RegraNegocio, sqlite3.Error) as exc:
+            except (ValueError, sqlite3.Error) as exc:
                 print('Erro:', exc)
 
     def mentor(self, u, h, op):
@@ -256,7 +258,7 @@ class CLI:
             if e is None:
                 return
             if any(m.equipe_id == e for m in self.s.mentor(u, h).visualizar_mentorias()):
-                raise RegraNegocio('Mentoria existente. Use Editar comentários.')
+                raise ValueError('Mentoria existente. Use Editar comentários.')
         else:
             mentorias = self.s.mentor(u, h).visualizar_mentorias()
             ident = selecionar_id(mentorias, 'ID da mentoria')
@@ -264,7 +266,7 @@ class CLI:
                 return
             m = next((m for m in mentorias if m.id == ident), None)
             if m is None:
-                raise RegraNegocio('Mentoria não encontrada entre suas mentorias.')
+                raise ValueError('Mentoria não encontrada entre suas mentorias.')
             e = m.equipe_id
         comentarios = input('Comentários: ')
         if op == '2':
@@ -282,7 +284,7 @@ class CLI:
         if p is None:
             return
         if not any(r['id'] == p for r in projetos):
-            raise RegraNegocio('Escolha um projeto da lista acima.')
+            raise ValueError('Escolha um projeto da lista acima.')
         nota, comentario = inteiro('Nota inteira: '), input('Comentário: ')
         if op == '4':
             self.s.jurado(u, h).avaliar_projeto(p, nota, comentario)
@@ -292,7 +294,7 @@ class CLI:
 
 
 def main():
-    db = conectar()
+    db = Database()
     try:
         CLI(Sistema(db)).executar()
     except (EOFError, KeyboardInterrupt):

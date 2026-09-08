@@ -1,84 +1,53 @@
 """Entidades e regras de negócio. Cada papel pertence a um hackathon específico."""
 import sqlite3
-from dataclasses import dataclass
+from dataclasses import dataclass, field
+from database import Database
 from datetime import date
 
 
-class RegraNegocio(ValueError):
-    pass
+def papel(db, u, h, esperado=None):
+    r = db.inscricao(u, h)
+    if not r or (esperado and r['papel'] != esperado):
+        raise ValueError('Você não possui o papel necessário neste hackathon.')
+    return r['papel']
 
 
 def texto(valor):
     valor = valor.strip()
     if not valor:
-        raise RegraNegocio('Preencha todos os campos.')
+        raise ValueError('Preencha todos os campos.')
     return valor
 
 
-class Entidade:
-    """Compartilha somente acesso ao banco; as ações ficam nas entidades concretas.
-
-    A conexão não é um campo da dataclass, portanto não integra sua representação.
-    """
-    def vincular(self, db):
-        self.db = db
-        return self
-
-    def obter(self, tabela, ident):
-        return obter(self.db, tabela, ident)
-
-    def papel(self, u, h, esperado=None):
-        return papel(self.db, u, h, esperado)
-
-    def hackathon(self, h):
-        return Hackathon(**dict(self.obter('hackathons', h))).vincular(self.db)
-
-    def equipe(self, e):
-        return Equipe(**dict(self.obter('equipes', e))).vincular(self.db)
-
-
-def obter(db, tabela, ident):
-    if tabela not in ('usuarios', 'hackathons', 'equipes', 'projetos', 'mentorias', 'avaliacoes'):
-        raise ValueError('Tabela inválida.')
-    row = db.execute(f'SELECT * FROM {tabela} WHERE id=?', (ident,)).fetchone()
-    if row is None:
-        raise RegraNegocio('Registro não encontrado.')
-    return row
-
-def papel(db, u, h, esperado=None):
-    r = db.execute('SELECT papel FROM inscricoes WHERE usuario_id=? AND hackathon_id=?', (u, h)).fetchone()
-    if not r or (esperado and r['papel'] != esperado):
-        raise RegraNegocio('Você não possui o papel necessário neste hackathon.')
-    return r['papel']
-
 @dataclass
-class Organizador(Entidade):
+class Organizador:
+    db: Database = field(repr=False, compare=False, kw_only=True)
     id: int
     nome: str
     email: str
 
     def validar_propriedade(self, h):
         u = self.id
-        if not self.obter('usuarios', u)['organizador']:
-            raise RegraNegocio('Somente organizadores podem gerenciar hackathons.')
-        if self.obter('hackathons', h)['organizador_id'] != u:
-            raise RegraNegocio('Somente o organizador deste hackathon pode alterá-lo.')
+        if not self.db.obter('usuarios', u)['organizador']:
+            raise ValueError('Somente organizadores podem gerenciar hackathons.')
+        if self.db.obter('hackathons', h)['organizador_id'] != u:
+            raise ValueError('Somente o organizador deste hackathon pode alterá-lo.')
 
     def salvar_hackathon(self, nome, inicio, fim, limite, h=None):
         u = self.id
-        if not self.obter('usuarios', u)['organizador']:
-            raise RegraNegocio('Somente organizadores podem gerenciar hackathons.')
+        if not self.db.obter('usuarios', u)['organizador']:
+            raise ValueError('Somente organizadores podem gerenciar hackathons.')
         nome = texto(nome)
         try:
             inicio, fim = date.fromisoformat(inicio), date.fromisoformat(fim)
         except ValueError:
-            raise RegraNegocio('Use datas válidas no formato AAAA-MM-DD.') from None
+            raise ValueError('Use datas válidas no formato AAAA-MM-DD.') from None
         if fim < inicio or type(limite) is not int or limite <= 0:
-            raise RegraNegocio('Verifique o período e o limite positivo de equipes.')
+            raise ValueError('Verifique o período e o limite positivo de equipes.')
         if h is not None:
             self.validar_propriedade(h)
-            if limite < len(self.hackathon(h).equipes()):
-                raise RegraNegocio('O limite não pode ser menor que o total de equipes existentes.')
+            if limite < len(Hackathon(db=self.db, **dict(self.db.obter('hackathons', h))).equipes()):
+                raise ValueError('O limite não pode ser menor que o total de equipes existentes.')
         with self.db:
             if h is None:
                 return self.db.execute('INSERT INTO hackathons(organizador_id,nome,data_inicio,data_fim,max_equipes) VALUES(?,?,?,?,?)',
@@ -94,9 +63,9 @@ class Organizador(Entidade):
             self.db.execute('DELETE FROM hackathons WHERE id=?', (h,))
 
     def visualizar_hackathons(self):
-        if not self.obter('usuarios', self.id)['organizador']:
-            raise RegraNegocio('Somente organizadores podem gerenciar hackathons.')
-        return [Hackathon(**dict(r)).vincular(self.db) for r in self.db.execute(
+        if not self.db.obter('usuarios', self.id)['organizador']:
+            raise ValueError('Somente organizadores podem gerenciar hackathons.')
+        return [Hackathon(**dict(r), db=self.db) for r in self.db.execute(
             'SELECT * FROM hackathons WHERE organizador_id=? ORDER BY id', (self.id,))]
 
     def criar_hackathon(self, nome, inicio, fim, limite):
@@ -107,7 +76,8 @@ class Organizador(Entidade):
 
 
 @dataclass
-class Hackathon(Entidade):
+class Hackathon:
+    db: Database = field(repr=False, compare=False, kw_only=True)
     id: int
     organizador_id: int
     nome: str
@@ -117,7 +87,7 @@ class Hackathon(Entidade):
 
     def equipes(self, busca=""):
         h = self.id
-        return [Equipe(**dict(r)).vincular(self.db) for r in self.db.execute(
+        return [Equipe(**dict(r), db=self.db) for r in self.db.execute(
             'SELECT * FROM equipes WHERE hackathon_id=? AND instr(lower(nome),lower(?))>0 ORDER BY nome', (h, busca))]
 
     def ranking(self):
@@ -147,33 +117,34 @@ class Hackathon(Entidade):
 
     def entrar(self, u, papel):
         h = self.id
-        self.obter('hackathons', h)
-        if self.obter('usuarios', u)['organizador']:
-            raise RegraNegocio('O organizador utiliza o menu de organização.')
+        self.db.obter('hackathons', h)
+        if self.db.obter('usuarios', u)['organizador']:
+            raise ValueError('O organizador utiliza o menu de organização.')
         if papel not in ('participante', 'mentor', 'jurado'):
-            raise RegraNegocio('Papel inválido.')
+            raise ValueError('Papel inválido.')
         if self.db.execute('SELECT 1 FROM inscricoes WHERE usuario_id=? AND hackathon_id=?', (u, h)).fetchone():
-            raise RegraNegocio('Saia do hackathon antes de escolher outro papel.')
+            raise ValueError('Saia do hackathon antes de escolher outro papel.')
         with self.db:
             self.db.execute('INSERT INTO inscricoes VALUES(?,?,?)', (u, h, papel))
 
 
 @dataclass
-class Usuario(Entidade):
+class Usuario:
+    db: Database = field(repr=False, compare=False, kw_only=True)
     id: int
     nome: str
     email: str
     hackathon_id: int
 
     def validar(self):
-        self.papel(self.id, self.hackathon_id, self.PAPEL)
+        papel(self.db, self.id, self.hackathon_id, self.PAPEL)
 
     def sair_hackathon(self):
         self.validar()
         lider = self.db.execute('SELECT 1 FROM equipes WHERE lider_id=? AND hackathon_id=?',
                                 (self.id, self.hackathon_id)).fetchone()
         if lider:
-            raise RegraNegocio('Transfira a liderança antes de sair; se estiver sozinho, exclua a equipe.')
+            raise ValueError('Transfira a liderança antes de sair; se estiver sozinho, exclua a equipe.')
         with self.db:
             self.db.execute('DELETE FROM membros WHERE usuario_id=? AND hackathon_id=?', (self.id, self.hackathon_id))
             self.db.execute('DELETE FROM inscricoes WHERE usuario_id=? AND hackathon_id=?', (self.id, self.hackathon_id))
@@ -187,43 +158,44 @@ class Participante(Usuario):
         self.validar()
         u, h = self.id, self.hackathon_id
         r = self.db.execute('SELECT e.* FROM equipes e JOIN membros m ON m.equipe_id=e.id WHERE m.usuario_id=? AND m.hackathon_id=?', (u, h)).fetchone()
-        return Equipe(**dict(r)).vincular(self.db) if r else None
+        return Equipe(**dict(r), db=self.db) if r else None
 
     def criar_equipe(self, nome):
         u, h = self.id, self.hackathon_id
         nome = texto(nome)
-        self.papel(u, h, 'participante')
+        papel(self.db, u, h, 'participante')
         with self.db:
             self.db.execute('BEGIN IMMEDIATE')
             if self.visualizar_equipe():
-                raise RegraNegocio('Você já está em uma equipe neste hackathon.')
-            if len(self.hackathon(h).equipes()) >= self.obter('hackathons', h)['max_equipes']:
-                raise RegraNegocio('Limite de equipes atingido.')
+                raise ValueError('Você já está em uma equipe neste hackathon.')
+            if len(Hackathon(db=self.db, **dict(self.db.obter('hackathons', h))).equipes()) >= self.db.obter('hackathons', h)['max_equipes']:
+                raise ValueError('Limite de equipes atingido.')
             try:
                 e = self.db.execute('INSERT INTO equipes(hackathon_id,lider_id,nome) VALUES(?,?,?)', (h, u, nome)).lastrowid
             except sqlite3.IntegrityError:
-                raise RegraNegocio('Já existe uma equipe com esse nome.') from None
+                raise ValueError('Já existe uma equipe com esse nome.') from None
             self.db.execute('INSERT INTO membros VALUES(?,?,?)', (u, h, e))
             return e
 
     def entrar_equipe(self, e):
         u, h = self.id, self.hackathon_id
-        self.papel(u, h, 'participante')
-        if self.obter('equipes', e)['hackathon_id'] != h:
-            raise RegraNegocio('Equipe de outro hackathon.')
+        papel(self.db, u, h, 'participante')
+        if self.db.obter('equipes', e)['hackathon_id'] != h:
+            raise ValueError('Equipe de outro hackathon.')
         try:
             with self.db:
                 self.db.execute('INSERT INTO membros VALUES(?,?,?)', (u, h, e))
         except sqlite3.IntegrityError:
-            raise RegraNegocio('Você já está em uma equipe neste hackathon.') from None
+            raise ValueError('Você já está em uma equipe neste hackathon.') from None
 
     def procurar_equipes(self, nome=''):
         self.validar()
-        return self.hackathon(self.hackathon_id).equipes(nome)
+        return Hackathon(db=self.db, **dict(self.db.obter('hackathons', self.hackathon_id))).equipes(nome)
 
 
 @dataclass
-class Equipe(Entidade):
+class Equipe:
+    db: Database = field(repr=False, compare=False, kw_only=True)
     id: int
     hackathon_id: int
     lider_id: int
@@ -231,10 +203,10 @@ class Equipe(Entidade):
 
     def validar_lider(self, u):
         e = self.id
-        equipe = self.obter('equipes', e)
-        self.papel(u, equipe['hackathon_id'], 'participante')
+        equipe = self.db.obter('equipes', e)
+        papel(self.db, u, equipe['hackathon_id'], 'participante')
         if equipe['lider_id'] != u:
-            raise RegraNegocio('Somente o líder pode executar esta ação.')
+            raise ValueError('Somente o líder pode executar esta ação.')
 
     def visualizar_participantes(self):
         e = self.id
@@ -248,13 +220,13 @@ class Equipe(Entidade):
                 self.db.execute('UPDATE equipes SET nome=? WHERE id=?', (texto(nome), e))
             self.nome = nome.strip()
         except sqlite3.IntegrityError:
-            raise RegraNegocio('Já existe uma equipe com esse nome.') from None
+            raise ValueError('Já existe uma equipe com esse nome.') from None
 
     def _alterar_membro(self, u, alvo, transferir=False):
         e = self.id
         self.validar_lider(u)
         if alvo == u or not any(p['id'] == alvo for p in self.visualizar_participantes()):
-            raise RegraNegocio('Escolha outro participante da equipe.')
+            raise ValueError('Escolha outro participante da equipe.')
         with self.db:
             if transferir:
                 self.db.execute('UPDATE equipes SET lider_id=? WHERE id=?', (alvo, e))
@@ -309,27 +281,27 @@ class Mentor(Usuario):
 
     def visualizar_mentorias(self):
         u, h = self.id, self.hackathon_id
-        self.papel(u, h, 'mentor')
+        papel(self.db, u, h, 'mentor')
         return [Mentoria(**dict(r)) for r in self.db.execute('SELECT m.* FROM mentorias m JOIN equipes e ON e.id=m.equipe_id WHERE m.mentor_id=? AND e.hackathon_id=?', (u, h))]
 
     def salvar_mentoria(self, e, comentarios):
         u, h = self.id, self.hackathon_id
-        self.papel(u, h, 'mentor')
-        if self.obter('equipes', e)['hackathon_id'] != h:
-            raise RegraNegocio('Equipe de outro hackathon.')
+        papel(self.db, u, h, 'mentor')
+        if self.db.obter('equipes', e)['hackathon_id'] != h:
+            raise ValueError('Equipe de outro hackathon.')
         with self.db:
             self.db.execute('''INSERT INTO mentorias(mentor_id,equipe_id,comentarios) VALUES(?,?,?)
                 ON CONFLICT(mentor_id,equipe_id) DO UPDATE SET comentarios=excluded.comentarios''', (u, e, texto(comentarios)))
 
     def iniciar_mentoria(self, e, comentarios):
         if any(m.equipe_id == e for m in self.visualizar_mentorias()):
-            raise RegraNegocio('Mentoria existente. Use Editar comentários.')
+            raise ValueError('Mentoria existente. Use Editar comentários.')
         self.salvar_mentoria(e, comentarios)
 
     def editar_comentarios(self, mentoria_id, comentarios):
         mentoria = next((m for m in self.visualizar_mentorias() if m.id == mentoria_id), None)
         if mentoria is None:
-            raise RegraNegocio('Mentoria não encontrada entre suas mentorias.')
+            raise ValueError('Mentoria não encontrada entre suas mentorias.')
         self.salvar_mentoria(mentoria.equipe_id, comentarios)
 
 
@@ -347,7 +319,7 @@ class Jurado(Usuario):
 
     def visualizar_projetos(self, filtro="todos"):
         u, h = self.id, self.hackathon_id
-        self.papel(u, h, 'jurado')
+        papel(self.db, u, h, 'jurado')
         rows = self.db.execute('''SELECT p.*,e.nome AS equipe,a.nota,a.comentario FROM projetos p
             JOIN equipes e ON e.id=p.equipe_id LEFT JOIN avaliacoes a ON a.projeto_id=p.id AND a.jurado_id=?
             WHERE e.hackathon_id=? ORDER BY p.id''', (u, h))
@@ -355,12 +327,12 @@ class Jurado(Usuario):
 
     def salvar_avaliacao(self, p, nota, comentario):
         u, h = self.id, self.hackathon_id
-        self.papel(u, h, 'jurado')
-        projeto = self.obter('projetos', p)
-        if self.obter('equipes', projeto['equipe_id'])['hackathon_id'] != h:
-            raise RegraNegocio('Projeto de outro hackathon.')
+        papel(self.db, u, h, 'jurado')
+        projeto = self.db.obter('projetos', p)
+        if self.db.obter('equipes', projeto['equipe_id'])['hackathon_id'] != h:
+            raise ValueError('Projeto de outro hackathon.')
         if type(nota) is not int or not -(2**63) <= nota < 2**63:
-            raise RegraNegocio('A nota deve ser um inteiro válido para SQLite.')
+            raise ValueError('A nota deve ser um inteiro válido para SQLite.')
         with self.db:
             self.db.execute('''INSERT INTO avaliacoes(jurado_id,projeto_id,nota,comentario) VALUES(?,?,?,?)
                 ON CONFLICT(jurado_id,projeto_id) DO UPDATE SET nota=excluded.nota,comentario=excluded.comentario''',
@@ -368,12 +340,12 @@ class Jurado(Usuario):
 
     def avaliar_projeto(self, p, nota, comentario):
         if not any(r['id'] == p for r in self.visualizar_projetos('pendentes')):
-            raise RegraNegocio('Escolha um projeto ainda não avaliado deste hackathon.')
+            raise ValueError('Escolha um projeto ainda não avaliado deste hackathon.')
         self.salvar_avaliacao(p, nota, comentario)
 
     def editar_avaliacao(self, p, nota, comentario):
         if not any(r['id'] == p for r in self.visualizar_projetos('avaliados')):
-            raise RegraNegocio('Você ainda não avaliou esse projeto neste hackathon.')
+            raise ValueError('Você ainda não avaliou esse projeto neste hackathon.')
         self.salvar_avaliacao(p, nota, comentario)
 
 
@@ -384,3 +356,4 @@ class Avaliacao:
     projeto_id: int
     nota: int
     comentario: str
+

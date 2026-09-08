@@ -98,8 +98,8 @@ def mostrar_demonstracao(db):
 
 
 if __name__ == '__main__':
-    from database import conectar
-    db = conectar()
+    from database import Database
+    db = Database()
     try:
         preparar(db)
     finally:

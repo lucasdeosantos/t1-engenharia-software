@@ -72,7 +72,7 @@ As senhas não aparecem enquanto são digitadas em um terminal normal. Entradas 
 ## Estrutura
 
 - `main.py`: menus e interação com o terminal.
-- `database.py`: conexão, tabelas, restrições e relacionamentos SQLite.
+- `database.py`: classe `Database`, conexão, consultas, tabelas e transações SQLite.
 - `models.py`: entidades com seus métodos e regras de negócio, incluindo validações de papel e liderança.
 - `services.py`: cadastro, autenticação e carregamento dos objetos da sessão.
 - `seed.py`: cadastro inicial idempotente do organizador.
@@ -91,7 +91,7 @@ As ações são executadas diretamente nas entidades:
 - `Mentor`: iniciar mentoria, consultar mentorias e editar comentários próprios.
 - `Jurado`: consultar projetos, avaliar e editar avaliações próprias.
 
-`Participante`, `Mentor` e `Jurado` compartilham a saída do evento por `PapelHackathon`. Cada objeto possui `hackathon_id`; o mesmo usuário pode ter objetos de papéis diferentes em eventos distintos. Cada ação consulta o vínculo atual no banco: guardar um objeto não permite continuar agindo depois de sair ou trocar de papel. A equipe também revalida o líder no banco em cada alteração.
+`Participante`, `Mentor` e `Jurado` compartilham a saída do evento por `Usuario`. Cada objeto possui `hackathon_id`; o mesmo usuário pode ter objetos de papéis diferentes em eventos distintos. Cada ação consulta o vínculo atual no banco: guardar um objeto não permite continuar agindo depois de sair ou trocar de papel. A equipe também revalida o líder no banco em cada alteração.
 
 Exemplo, com IDs de um usuário e de um hackathon em que ele já está inscrito como participante:
 
@@ -102,11 +102,11 @@ equipe = participante.visualizar_equipe()
 print(equipe.visualizar_participantes())
 ```
 
-Os modelos recebem a conexão SQLite por `vincular(db)` ao serem carregados pelo sistema. Não há dependência dos modelos em `services.py`, nem mudança no esquema do banco: mantenha o `hackathon.db` existente ao atualizar. `main.py` continua separado de `seed.py`.
+As classes que consultam o banco recebem a conexão SQLite pelo argumento obrigatório `db` no construtor, por exemplo `Participante(id, nome, email, hackathon_id, db=db)`. `Participante`, `Mentor` e `Jurado` herdam esse argumento de `Usuario`. A mesma instância de `Database` é compartilhada pelas classes. Ela oferece `execute`, `executemany`, `obter`, `inscricao`, `criar_tabelas` e `close`. O bloco `with db:` confirma as alterações quando termina normalmente e desfaz a transação em caso de erro, sem fechar a conexão. A validação de papel fica em `models.py`; o banco apenas consulta a inscrição. Erros de validação usam o `ValueError` nativo do Python, tratado pelos menus. Não há dependência dos modelos em `services.py`, nem mudança no esquema do banco: mantenha o `hackathon.db` existente ao atualizar. `main.py` continua separado de `seed.py`.
 
 ## Ranking das equipes
 
-Participantes, mentores e jurados acessam **8 - Ver ranking das equipes** no menu do hackathon. Organizadores acessam **5 - Ver ranking das equipes** e selecionam o evento; `0` cancela essa seleção.
+Participantes e mentores acessam **4 - Ver ranking das equipes**; jurados acessam **6 - Ver ranking das equipes** no menu do hackathon. Organizadores acessam **5 - Ver ranking das equipes** e selecionam o evento; `0` cancela essa seleção.
 
 O ranking usa a média aritmética de todas as avaliações do projeto, em ordem decrescente. Exibe equipe, projeto, média com duas casas decimais e quantidade de avaliações. Médias iguais compartilham posição (1, 1, 3); o nome ordena a exibição dentro do empate. A classificação considera a média antes do arredondamento. Equipes sem projeto ou sem avaliações aparecem no final, sem classificação. Avaliações históricas de jurados que saíram continuam contando. O ranking é recalculado a cada consulta.
 
@@ -120,4 +120,7 @@ Os testes não alteram o banco real. Para copiar os dados, encerre o sistema e c
 
 
 Todas as seleções de ID aceitam 0 para voltar ao menu sem alterar dados. Quando a lista está vazia, o sistema retorna sem pedir ID. IDs inválidos podem ser corrigidos na própria seleção. Editar comentários ou avaliações exige um registro próprio já existente.
+
+
+
 

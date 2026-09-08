@@ -1,12 +1,21 @@
+"""Persistência SQLite compartilhada pelos objetos do sistema."""
 import sqlite3
 from pathlib import Path
 
 
-def conectar(caminho=None):
-    db = sqlite3.connect(caminho or Path(__file__).with_name('hackathon.db'))
-    db.row_factory = sqlite3.Row
-    db.execute('PRAGMA foreign_keys = ON')
-    db.executescript('''
+class Database:
+    def __init__(self, caminho=None):
+        self._conexao = sqlite3.connect(caminho or Path(__file__).with_name('hackathon.db'))
+        self._conexao.row_factory = sqlite3.Row
+        try:
+            self.execute('PRAGMA foreign_keys = ON')
+            self.criar_tabelas()
+        except Exception:
+            self.close()
+            raise
+
+    def criar_tabelas(self):
+        self._conexao.executescript('''
     CREATE TABLE IF NOT EXISTS usuarios (
         id INTEGER PRIMARY KEY, nome TEXT NOT NULL, email TEXT NOT NULL UNIQUE,
         senha TEXT NOT NULL, organizador INTEGER NOT NULL DEFAULT 0);
@@ -41,4 +50,32 @@ def conectar(caminho=None):
         nota INTEGER NOT NULL CHECK(typeof(nota) = 'integer'), comentario TEXT NOT NULL,
         UNIQUE(jurado_id, projeto_id));
     ''')
-    return db
+
+    def execute(self, sql, parametros=()):
+        return self._conexao.execute(sql, parametros)
+
+    def executemany(self, sql, registros):
+        return self._conexao.executemany(sql, registros)
+
+    def inscricao(self, usuario_id, hackathon_id):
+        return self.execute('SELECT papel FROM inscricoes WHERE usuario_id=? AND hackathon_id=?',
+                            (usuario_id, hackathon_id)).fetchone()
+
+    def __enter__(self):
+        """Confirma ao sair normalmente; desfaz se ocorrer erro. Não fecha a conexão."""
+        self._conexao.__enter__()
+        return self
+
+    def __exit__(self, tipo, erro, traceback):
+        return self._conexao.__exit__(tipo, erro, traceback)
+
+    def close(self):
+        self._conexao.close()
+
+    def obter(self, tabela, ident):
+        if tabela not in ('usuarios', 'hackathons', 'equipes', 'projetos', 'mentorias', 'avaliacoes'):
+            raise ValueError('Tabela inválida.')
+        row = self.execute(f'SELECT * FROM {tabela} WHERE id=?', (ident,)).fetchone()
+        if row is None:
+            raise ValueError('Registro não encontrado.')
+        return row

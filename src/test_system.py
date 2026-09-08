@@ -4,15 +4,15 @@ from pathlib import Path
 import tempfile
 import unittest
 from unittest.mock import patch
-from database import conectar
+from database import Database
 from main import CLI, main
 from seed import preparar
-from services import Sistema, RegraNegocio
+from services import Sistema
 
 
 class SistemaTest(unittest.TestCase):
     def setUp(self):
-        self.db = conectar(':memory:')
+        self.db = Database(':memory:')
         self.s = Sistema(self.db)
         self.o = self.s.cadastrar('Organizador', 'org@local', 'segredo', organizador=True)
         self.a = self.s.cadastrar('Ana', 'ana@local', 'segredo')
@@ -33,9 +33,9 @@ class SistemaTest(unittest.TestCase):
 
     def test_autenticacao(self):
         self.assertEqual(self.s.login(' ANA@LOCAL ', 'segredo'), self.a)
-        with self.assertRaises(RegraNegocio):
+        with self.assertRaises(ValueError):
             self.s.login('ana@local', 'errada')
-        with self.assertRaises(RegraNegocio):
+        with self.assertRaises(ValueError):
             self.s.cadastrar('Duplicado', 'ANA@LOCAL', 'segredo')
         self.assertNotIn('segredo', self.s.obter('usuarios', self.a)['senha'])
 
@@ -43,19 +43,19 @@ class SistemaTest(unittest.TestCase):
         outro = self.s.organizador(self.o).salvar_hackathon('Outro', '2026-10-01', '2026-10-02', 1)
         self.s.hackathon(outro).entrar(self.a, 'jurado')
         self.assertEqual(self.s.papel(self.a, outro), 'jurado')
-        with self.assertRaises(RegraNegocio):
+        with self.assertRaises(ValueError):
             self.s.hackathon(self.h).entrar(self.a, 'mentor')
         self.s.atuacao(self.b, self.h).sair_hackathon()
         self.s.hackathon(self.h).entrar(self.b, 'mentor')
         self.assertEqual(self.s.papel(self.b, self.h), 'mentor')
 
     def test_lideranca_e_saida(self):
-        with self.assertRaises(RegraNegocio):
+        with self.assertRaises(ValueError):
             self.s.atuacao(self.a, self.h).sair_hackathon()
         self.s.participante(self.b, self.h).entrar_equipe(self.e)
-        with self.assertRaises(RegraNegocio):
+        with self.assertRaises(ValueError):
             self.s.atuacao(self.a, self.h).sair_hackathon()
-        with self.assertRaises(RegraNegocio):
+        with self.assertRaises(ValueError):
             self.s.equipe(self.e).remover_participante(self.a, self.a)
         self.s.equipe(self.e).transferir_lideranca(self.a, self.b)
         self.s.atuacao(self.a, self.h).sair_hackathon()
@@ -73,19 +73,19 @@ class SistemaTest(unittest.TestCase):
         self.assertEqual(len(self.s.equipe(self.e).visualizar_participantes()), 1)
 
     def test_limite_e_unicidade(self):
-        with self.assertRaises(RegraNegocio):
+        with self.assertRaises(ValueError):
             self.s.participante(self.a, self.h).criar_equipe('Outra')
-        with self.assertRaises(RegraNegocio):
+        with self.assertRaises(ValueError):
             self.s.participante(self.b, self.h).criar_equipe('equipe a')
         self.assertIsNone(self.s.participante(self.b, self.h).visualizar_equipe())
         self.s.participante(self.b, self.h).criar_equipe('Equipe B')
-        with self.assertRaises(RegraNegocio):
+        with self.assertRaises(ValueError):
             self.s.participante(self.b, self.h).entrar_equipe(self.e)
-        with self.assertRaises(RegraNegocio):
+        with self.assertRaises(ValueError):
             self.s.organizador(self.o).salvar_hackathon('Evento', '2026-09-01', '2026-09-30', 1, self.h)
         c = self.s.cadastrar('Carla', 'c@local', 'segredo')
         self.s.hackathon(self.h).entrar(c, 'participante')
-        with self.assertRaises(RegraNegocio):
+        with self.assertRaises(ValueError):
             self.s.participante(c, self.h).criar_equipe('Equipe C')
 
     def test_permissoes(self):
@@ -100,7 +100,7 @@ class SistemaTest(unittest.TestCase):
             lambda: self.s.mentor(self.j, self.h).salvar_mentoria(self.e, 'X'),
             lambda: self.s.jurado(self.m, self.h).salvar_avaliacao(p, 8, 'X'),
         ):
-            with self.subTest(operacao=operacao), self.assertRaises(RegraNegocio):
+            with self.subTest(operacao=operacao), self.assertRaises(ValueError):
                 operacao()
 
     def test_historico_e_filtros_individuais(self):
@@ -117,7 +117,7 @@ class SistemaTest(unittest.TestCase):
         self.s.atuacao(self.m, self.h).sair_hackathon()
         self.assertEqual(self.db.execute('SELECT count(*) FROM avaliacoes').fetchone()[0], 2)
         self.assertEqual(self.db.execute('SELECT count(*) FROM mentorias').fetchone()[0], 1)
-        with self.assertRaises(RegraNegocio):
+        with self.assertRaises(ValueError):
             self.s.jurado(self.j, self.h).salvar_avaliacao(p, 9, 'Sem vínculo')
         self.s.hackathon(self.h).entrar(self.j, 'jurado')
         self.s.hackathon(self.h).entrar(self.m, 'mentor')
@@ -142,7 +142,7 @@ class SistemaTest(unittest.TestCase):
             lambda: self.s.organizador(self.o).salvar_hackathon('X', '2026-02-30', '2026-03-01', 1),
             lambda: self.s.organizador(self.o).salvar_hackathon('X', '2026-09-30', '2026-09-01', 1),
         ):
-            with self.subTest(operacao=operacao), self.assertRaises(RegraNegocio):
+            with self.subTest(operacao=operacao), self.assertRaises(ValueError):
                 operacao()
 
     def test_exclusoes_sem_orfaos(self):
@@ -185,7 +185,7 @@ class SistemaTest(unittest.TestCase):
             preparar(self.db)
         self.assertEqual(dict(self.s.obter('usuarios', self.a)), original)
         self.assertEqual(self.s.login('org@local', 'Adm123!'), self.o)
-        with self.assertRaises(RegraNegocio):
+        with self.assertRaises(ValueError):
             self.s.login('org@local', 'segredo')
         self.assertEqual(len(self.s.hackathons()), 2)
         self.assertEqual(self.s.obter('equipes', self.e)['nome'], 'Equipe A')
@@ -214,7 +214,7 @@ class SistemaTest(unittest.TestCase):
             lambda: mentor.iniciar_mentoria(self.e, 'Indevida'),
             lambda: jurado.avaliar_projeto(p, 9, 'Indevida'),
         ):
-            with self.assertRaises(RegraNegocio):
+            with self.assertRaises(ValueError):
                 acao()
         self.assertEqual(self.s.papel(self.b, self.h), 'mentor')
 
@@ -223,7 +223,7 @@ class SistemaTest(unittest.TestCase):
         self.s.participante(self.b, self.h).entrar_equipe(self.e)
         equipe.transferir_lideranca(self.a, self.b)
         self.assertEqual(equipe.lider_id, self.b)
-        with self.assertRaises(RegraNegocio):
+        with self.assertRaises(ValueError):
             equipe.salvar_projeto(self.a, 'X', 'X', 'X')
         equipe.renomear(self.b, 'Novo nome')
         self.assertEqual(equipe.nome, 'Novo nome')
@@ -232,20 +232,20 @@ class SistemaTest(unittest.TestCase):
         p = self.projeto()
         mentor = self.s.mentor(self.m, self.h)
         mentor.iniciar_mentoria(self.e, 'Inicial')
-        with self.assertRaises(RegraNegocio):
+        with self.assertRaises(ValueError):
             mentor.iniciar_mentoria(self.e, 'Duplicada')
         m = mentor.visualizar_mentorias()[0]
         mentor.editar_comentarios(m.id, 'Editado')
         self.assertEqual(mentor.visualizar_mentorias()[0].comentarios, 'Editado')
         self.s.atuacao(self.b, self.h).sair_hackathon()
         self.s.hackathon(self.h).entrar(self.b, 'mentor')
-        with self.assertRaises(RegraNegocio):
+        with self.assertRaises(ValueError):
             self.s.mentor(self.b, self.h).editar_comentarios(m.id, 'Indevido')
         jurado = self.s.jurado(self.j, self.h)
-        with self.assertRaises(RegraNegocio):
+        with self.assertRaises(ValueError):
             jurado.editar_avaliacao(p, 7, 'Não existe')
         jurado.avaliar_projeto(p, 7, 'Inicial')
-        with self.assertRaises(RegraNegocio):
+        with self.assertRaises(ValueError):
             jurado.avaliar_projeto(p, 8, 'Duplicada')
         jurado.editar_avaliacao(p, 9, 'Editada')
         self.assertEqual(jurado.visualizar_projetos('avaliados')[0]['nota'], 9)
@@ -323,7 +323,7 @@ class SistemaTest(unittest.TestCase):
     def test_ranking_menus_todos_papeis(self):
         cli = CLI(self.s)
         for u in (self.a, self.m, self.j):
-            with patch('builtins.input', side_effect=['8', '0']), contextlib.redirect_stdout(io.StringIO()) as saida:
+            with patch('builtins.input', side_effect=['6' if u == self.j else '4', '0']), contextlib.redirect_stdout(io.StringIO()) as saida:
                 cli.hackathon(u, self.h)
             self.assertIn('RANKING / Evento', saida.getvalue())
             self.assertIn('Equipe A', saida.getvalue())
@@ -335,13 +335,31 @@ class SistemaTest(unittest.TestCase):
         self.assertNotIn('RANKING /', saida.getvalue())
 
 
+class DatabaseTest(unittest.TestCase):
+    def test_transacao_confirma_e_desfaz(self):
+        db = Database(':memory:')
+        try:
+            with db:
+                db.execute("INSERT INTO usuarios(nome,email,senha) VALUES('Ana','ana@teste','hash')")
+            with self.assertRaises(ValueError):
+                with db:
+                    db.execute("UPDATE usuarios SET nome='Alterado' WHERE id=1")
+                    raise ValueError('Cancelar operação')
+            self.assertEqual(db.obter('usuarios', 1)['nome'], 'Ana')
+            self.assertIsNone(db.inscricao(1, 999))
+            db.criar_tabelas()
+            self.assertEqual(db.obter('usuarios', 1)['nome'], 'Ana')
+        finally:
+            db.close()
+
+
 class PersistenciaTest(unittest.TestCase):
     def test_main_nao_executa_seed(self):
         with tempfile.TemporaryDirectory() as pasta:
             caminho = Path(pasta) / 'teste.db'
-            with patch('main.conectar', side_effect=lambda: conectar(caminho)), patch('builtins.input', return_value='3'), contextlib.redirect_stdout(io.StringIO()) as saida:
+            with patch('main.Database', side_effect=lambda: Database(caminho)), patch('builtins.input', return_value='3'), contextlib.redirect_stdout(io.StringIO()) as saida:
                 main()
-            db = conectar(caminho)
+            db = Database(caminho)
             try:
                 self.assertEqual(db.execute('SELECT count(*) FROM usuarios').fetchone()[0], 0)
                 self.assertEqual(db.execute('SELECT count(*) FROM hackathons').fetchone()[0], 0)
@@ -353,7 +371,7 @@ class PersistenciaTest(unittest.TestCase):
     def test_reabrir_banco_e_seed_idempotente(self):
         with tempfile.TemporaryDirectory() as pasta:
             caminho = Path(pasta) / 'teste.db'
-            db = conectar(caminho)
+            db = Database(caminho)
             with contextlib.redirect_stdout(io.StringIO()) as saida:
                 preparar(db)
                 preparar(db)
@@ -365,7 +383,7 @@ class PersistenciaTest(unittest.TestCase):
             self.assertIn('Demonstração disponível:', saida.getvalue())
             self.assertEqual(saida.getvalue().count('Demo123!'), 2)
             db.close()
-            db = conectar(caminho)
+            db = Database(caminho)
             try:
                 self.assertEqual(Sistema(db).login('organizador@local', senha), 1)
                 self.assertEqual(db.execute('SELECT count(*) FROM usuarios').fetchone()[0], 9)
