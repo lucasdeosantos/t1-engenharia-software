@@ -1,4 +1,3 @@
-"""Persistência SQLite compartilhada pelos objetos do sistema."""
 import sqlite3
 from pathlib import Path
 

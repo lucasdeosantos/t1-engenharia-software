@@ -1,5 +1,3 @@
-"""Carga explícita de dados: execute python seed.py antes de usar as contas de exemplo."""
-import secrets
 from services import Sistema, senha_hash
 
 

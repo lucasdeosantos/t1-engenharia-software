@@ -1,4 +1,3 @@
-"""Interface exclusivamente pelo terminal. Execute: python main.py."""
 from dataclasses import fields, is_dataclass
 from getpass import getpass
 import sqlite3

@@ -1,4 +1,3 @@
-"""Cadastro, autenticação e carregamento das entidades da sessão."""
 import hashlib
 import hmac
 import secrets

@@ -1,4 +1,3 @@
-"""Entidades e regras de negócio. Cada papel pertence a um hackathon específico."""
 import sqlite3
 from dataclasses import dataclass, field
 from database import Database
