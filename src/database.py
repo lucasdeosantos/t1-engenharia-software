@@ -61,7 +61,6 @@ class Database:
                             (usuario_id, hackathon_id)).fetchone()
 
     def __enter__(self):
-        """Confirma ao sair normalmente; desfaz se ocorrer erro. Não fecha a conexão."""
         self._conexao.__enter__()
         return self
 

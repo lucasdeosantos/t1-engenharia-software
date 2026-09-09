@@ -1,5 +1,5 @@
+import secrets
 from services import Sistema, senha_hash
-
 
 def preparar(db):
     senha = 'Adm123!'
@@ -17,7 +17,6 @@ def preparar(db):
 
 
 def popular_demonstracao(db):
-    """Aplica o conjunto de demonstração uma vez, inclusive em bancos antigos."""
     with db:
         db.execute('CREATE TABLE IF NOT EXISTS seeds (nome TEXT PRIMARY KEY)')
         db.execute('BEGIN IMMEDIATE')
@@ -28,7 +27,6 @@ def popular_demonstracao(db):
         organizador = db.execute('SELECT id FROM usuarios WHERE organizador=1 ORDER BY id LIMIT 1').fetchone()[0]
         h = db.execute('''INSERT INTO hackathons(organizador_id,nome,data_inicio,data_fim,max_equipes)
             VALUES(?,?,?,?,?)''', (organizador, 'Hackathon Inovação — Demonstração', '2026-09-01', '2026-09-30', 5)).lastrowid
-        # Sufixo evita reutilizar ou modificar qualquer conta já cadastrada.
         sufixo = ''
         apelidos = ('ana', 'bruno', 'carla', 'diego', 'marina', 'rafael', 'julia', 'pedro')
         while any(db.execute('SELECT 1 FROM usuarios WHERE email=?', (f'{a}{sufixo}@demo.local',)).fetchone() for a in apelidos):
@@ -56,7 +54,6 @@ def popular_demonstracao(db):
             (ids[4], equipes[0], 'Validar os pontos de coleta com moradores.'),
             (ids[5], equipes[1], 'Testar a proposta com um grupo pequeno de estudantes.'),
         ))
-        # Pedro ainda não avaliou o segundo projeto: permite testar o filtro de pendentes.
         db.executemany('INSERT INTO avaliacoes(jurado_id,projeto_id,nota,comentario) VALUES(?,?,?,?)', (
             (ids[6], projetos[0], 9, 'Proposta clara e impacto relevante.'),
             (ids[6], projetos[1], 8, 'Boa proposta; detalhar a validação.'),
@@ -71,7 +68,6 @@ def popular_demonstracao(db):
 
 
 def mostrar_demonstracao(db):
-    """Exibe o estado atual dos exemplos, inclusive em bancos de versões anteriores."""
     eventos = db.execute("SELECT id,nome FROM hackathons WHERE nome=?",
                         ('Hackathon Inovação — Demonstração',)).fetchall()
     if not eventos:

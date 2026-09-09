@@ -2,8 +2,7 @@ import hashlib
 import hmac
 import secrets
 import sqlite3
-from models import (texto, papel, Hackathon, Equipe,
-                    Organizador, Participante, Mentor, Jurado)
+from models import (texto, papel, Hackathon, Equipe, Organizador, Participante, Mentor, Jurado)
 
 
 def senha_hash(senha, salt=None):
