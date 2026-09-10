@@ -90,7 +90,7 @@ class Hackathon:
             'SELECT * FROM equipes WHERE hackathon_id=? AND instr(lower(nome),lower(?))>0 ORDER BY nome', (h, busca))]
 
     def ranking(self):
-        """Média decrescente; empates compartilham posição; não avaliadas ao final."""
+        # média decrescente, empates compartilham posição, não avaliadas ao final.
         rows = self.db.execute('''
             SELECT e.id AS equipe_id, e.nome AS equipe, p.titulo AS projeto,
                    AVG(a.nota) AS media, COUNT(a.id) AS avaliacoes
